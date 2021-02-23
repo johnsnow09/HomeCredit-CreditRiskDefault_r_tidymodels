@@ -1,0 +1,1289 @@
+---
+title: "tidymodel - HomeCredit-Credit Risk Default"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '6'
+    df_print: paged
+  html_notebook:
+    highlight: tango
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+    number_sections: no
+    toc_depth: 6
+---
+
+
+## options & settings
+
+chunk options
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi = 300, out.width = "100%",attr.output='style="max-height: 300px;"')
+```
+
+
+CSS for scrollable output & Header colors 
+
+```{css, echo=FALSE}
+.scroll-100 {
+  max-height: 100px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+
+tbody tr:hover {
+  background: #dddddd;
+}
+
+
+h1, #TOC>ul>li {
+  color: #B64D3A;
+}
+
+h2, #TOC>ul>ul>li {
+  color: #000000;
+}
+
+h3, #TOC>ul>ul>ul>li {
+  color: #643cb2;
+}
+
+h4, #TOC>ul>ul>ul>ul>li {
+  color: #ae0058;
+}
+
+h5, #TOC>ul>ul>ul>ul>ul>li {
+  color: #ffa447;
+}
+
+h6, #TOC>ul>ul>ul>ul>ul>ul>li {
+  color: #DAE3D9;
+}
+
+
+```
+
+Turning scientific / Exponential numbers off
+
+```{r}
+options(scipen = 999)
+```
+
+
+## Source
+
+https://www.kaggle.com/moizzz/applied-predictive-modelling-brief-overview/code
+https://www.kaggle.com/c/home-credit-default-risk
+
+
+## Loading libs
+
+```{r}
+library(tidyverse)
+library(ggthemes)
+```
+
+```{r}
+library(GGally)
+library(caret)
+library(tidymodels)
+# library(data.table)
+# library(DT)
+```
+
+
+
+## Creating & setting custom theme
+
+```{r}
+
+theme_viny_bright <- function(){
+  
+  library(ggthemes)
+  
+  ggthemes::theme_fivethirtyeight() %+replace%
+  
+  theme(
+    axis.title = element_text(),
+    
+    axis.text = element_text(size = 13),
+    
+    legend.text = element_text(size = 10),
+    
+    panel.background = element_rect(fill = "white"),
+    
+    plot.background = element_rect(fill = "white"),
+    
+    strip.background = element_blank(),
+    
+    legend.background = element_rect(fill = NA),
+    
+    legend.key = element_rect(fill = NA),
+
+    plot.title = element_text(hjust = 0.5,
+                              size = 19,
+                              face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, colour = "maroon")
+      )
+  
+  }
+
+theme_set(theme_viny_bright())
+```
+
+
+## Loading data
+
+```{r}
+dt1 <- read.csv("application_train.csv")
+
+test <- read.csv("application_test.csv")
+```
+
+## EDA
+
+```{r}
+dt1 %>% head()
+```
+
+```{r}
+str(dt1)
+```
+
+### NA's in columns
+
+#### Count
+
+```{r}
+# colSums(dt1, is.na)
+
+# this gives error
+```
+
+```{r}
+na_count <- colSums(is.na(dt1))
+na_count
+```
+
+```{r}
+na_count %>% 
+  as.data.frame() %>% 
+  arrange(desc(.))
+```
+
+#### Percentage
+
+missing data percentage
+
+```{r}
+round(na_count / dim(dt1)[1] * 100, digits = 2) 
+```
+
+```{r}
+round(na_count / dim(dt1)[1] * 100, digits = 2) %>% 
+ as.data.frame() %>% 
+  arrange(desc(.))
+```
+
+```{r}
+mv_data <- round(na_count / dim(dt1)[1] * 100, digits = 2) %>% 
+ as.data.frame() %>% 
+  arrange(desc(.)) %>%
+  rownames_to_column(var = "var_names") %>% 
+  mutate(var_names = as.factor(var_names)) %>% 
+  
+  rename(missing_values = ".")
+
+mv_data
+```
+
+
+
+```{r fig.width=8, fig.height=10}
+
+mv_data %>% head(n = 40) %>% 
+  ggplot(aes(x = missing_values/100, y = reorder(var_names, missing_values))) +
+  geom_col() +
+  theme_classic() +
+  ylab("column names") +
+  scale_x_continuous(labels = scales::percent)
+
+# since we are using scales::percent so had to divide missing values by 100 
+```
+
+
+```{r}
+summarise_all(dt1, funs(n_distinct, typeof)) 
+
+# this has results in double columns i.e 244 instead of double rows 
+```
+
+As per kagglers `365243` needs to be marked as missing value
+
+```{r}
+dt1$DAYS_EMPLOYED[dt1$DAYS_EMPLOYED == 365243] <- NA
+```
+
+
+```{r}
+sum(is.na(dt1$DAYS_EMPLOYED))
+```
+
+```{r}
+sapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE))
+```
+
+```{r}
+dt1[,sapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE))] 
+```
+
+
+
+```{r}
+dt1[,sapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE)) == TRUE] 
+```
+
+```{r}
+# dt1[,lapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE))] 
+
+# this gives error
+```
+
+```{r}
+dt1[,lapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE)) == TRUE] 
+```
+
+
+since data.table is altering the basic r functionality so adding `with = FALSE` to get it done
+
+answered on `stackoverflow`: https://stackoverflow.com/questions/65089990/how-to-filter-true-values-from-logical-results-of-sapply/65090049
+
+```{r}
+# dt1[,sapply(dt1, FUN = function(x) all(x <= 0, na.rm = TRUE)), with = FALSE] 
+
+# this returns error as data.table lib is removed
+```
+
+so removing `data.table` lib from here onwards
+
+```{r}
+# detach("package:data.table", unload = TRUE)
+```
+
+
+```{r}
+# dt1 %>% select(across(everything(), ~ is.numeric(.x)))
+
+# this gives error
+```
+
+```{r}
+# dt1 %>% select(across(everything(), is.numeric))
+# this gives error
+
+```
+
+```{r}
+dt1 %>% select_if(is.numeric)
+```
+
+
+### Finding missing values rows wise
+
+
+```{r}
+dt1 %>% 
+  mutate(row_key = row_number()) %>% head()
+```
+
+
+```{r}
+dt1 %>% 
+  mutate(row_key = row_number()) %>% 
+  gather(key = "key", value = "value", -row_key) %>% 
+  head()
+```
+
+```{r}
+dt1 %>% 
+  mutate(row_key = row_number()) %>% 
+  gather(key = "key", value = "value", -row_key) %>% 
+  filter(value %>% is.na()) %>% 
+  count(row_key, sort = TRUE)
+```
+
+### count of unique values in vars
+
+```{r}
+summarise_all(dt1, n_distinct) 
+```
+
+```{r}
+summarise_all(dt1, n_distinct) %>% 
+  pivot_longer(., cols = everything(), 
+               names_to = "var_names", 
+               values_to = "unique_count") %>% 
+  arrange(desc(unique_count) )
+```
+
+
+```{r}
+summarise_all(dt1, n_distinct) %>%
+  pivot_longer(., cols = everything(), 
+               names_to = "var_names", 
+               values_to = "unique_count") %>% 
+  arrange(unique_count)  
+```
+
+```{r fig.width=8, fig.height=10}
+summarise_all(dt1, n_distinct) %>%
+  pivot_longer(., cols = everything(), 
+               names_to = "var_names", 
+               values_to = "unique_count") %>% 
+  filter(unique_count < 100) %>% 
+  
+  ggplot(aes(y =reorder(var_names, desc(unique_count)), x = unique_count)) +
+  geom_point() +
+  theme_light()
+```
+
+**Rest of EDA was covered in other pca/ml - parsnip projects of Home Credit - Credit Risk Default**
+
+## Model Building Process
+
+check for balance / imbalance
+
+```{r}
+table(dt1$TARGET)
+```
+
+this is an unbalanced data
+
+
+```{r}
+dt1 <- dt1 %>% 
+  mutate(TARGET = as.factor(TARGET))
+```
+
+
+### TRAIN TESt Split
+
+```{r}
+set.seed(1234)
+data_split <- initial_split(dt1, strata = TARGET)
+
+dt1_train <- training(data_split)
+dt1_test <- testing(data_split)
+```
+
+
+```{r}
+data_split
+```
+
+```{r}
+dim(dt1_train)
+dim(dt1_test)
+```
+
+### recipes
+
+```{r}
+rec <- recipe(TARGET ~ ., data = dt1_train) %>% 
+      step_rm(contains("SK_ID_CURR")) %>% 
+      step_medianimpute(all_numeric()) %>% 
+      step_modeimpute(all_nominal()) %>% 
+      step_dummy(all_nominal(), - all_outcomes()) %>% 
+      step_range(all_numeric()) %>% 
+      step_normalize(all_numeric()) %>% 
+      step_zv(all_numeric()) %>% 
+      step_nzv(all_numeric()) %>%
+      step_corr(all_numeric()) %>% 
+      step_BoxCox(all_numeric()) %>% 
+      step_downsample(TARGET) %>% 
+      prep()
+```
+
+```{r}
+rec
+```
+
+juice gives the preprocessed data used in recipe
+
+```{r}
+juiced_dt1_train <- juice(rec)
+juiced_dt1_train
+```
+
+
+bake preprocesses any data based on recipe
+
+```{r}
+bake(rec, new_data = dt1_train)
+```
+
+checking if data has got balanced or not
+
+```{r}
+juiced_dt1_train$TARGET %>% table()
+```
+
+
+
+### RFE
+
+#### Sampling
+
+
+```{r}
+dt1_train_juiced_sample <-  juiced_dt1_train %>% sample_frac(0.20)
+
+dt1_train_juiced_sample %>% dim()
+```
+
+from: file:///E:/3.%20R/ML/Bank%20Marketing%20v3%20-%20includes%20Star%20Rating/Bankmarketing_caret_v3.nb.html
+
+```{r eval=FALSE}
+control <- rfeControl(functions = rfFuncs, method = "cv", verbose = FALSE)
+
+system.time(
+  RFE_res <- rfe(x = subset(dt1_tra, select = -TARGET),
+                 y = juiced_dt1_train$TARGET, 
+                 # sizes = c(7, 15, 20),
+                 rfeControl = control
+                 )
+) 
+```
+
+time taken to find RFE in mins:
+```{r}
+# 7395/60
+```
+
+```{r}
+# RFE_res$optVariables
+```
+
+
+```{r}
+# RFE_res$optVariables[1:15] 
+```
+
+Results of RFE trained on kaggle
+
+    'EXT_SOURCE_2''EXT_SOURCE_1''AMT_CREDIT''NAME_EDUCATION_TYPE_Higher.education''DAYS_BIRTH''DAYS_LAST_PHONE_CHANGE''CODE_GENDER_M''AMT_ANNUITY''NAME_CONTRACT_TYPE_Revolving.loans''DAYS_ID_PUBLISH''NAME_INCOME_TYPE_State.servant''FLAG_DOCUMENT_3''DEF_30_CNT_SOCIAL_CIRCLE''NAME_INCOME_TYPE_Working''DEF_60_CNT_SOCIAL_CIRCLE'
+
+```{r}
+# RFE_res$results
+```
+
+
+```{r}
+# RFE_res$variables
+```
+
+Results of RFE trained on kaggle
+
+    'EXT_SOURCE_2''EXT_SOURCE_1''AMT_CREDIT''NAME_EDUCATION_TYPE_Higher.education''DAYS_BIRTH''DAYS_LAST_PHONE_CHANGE''CODE_GENDER_M''AMT_ANNUITY''NAME_CONTRACT_TYPE_Revolving.loans''DAYS_ID_PUBLISH''NAME_INCOME_TYPE_State.servant''FLAG_DOCUMENT_3''DEF_30_CNT_SOCIAL_CIRCLE''NAME_INCOME_TYPE_Working''DEF_60_CNT_SOCIAL_CIRCLE''REGION_RATING_CLIENT''ORGANIZATION_TYPE_Self.employed''NAME_EDUCATION_TYPE_Secondary...secondary.special''FLOORSMAX_MODE''REG_CITY_NOT_LIVE_CITY''BASEMENTAREA_MODE''OCCUPATION_TYPE_Drivers''NONLIVINGAREA_MODE''FLAG_WORK_PHONE''ENTRANCES_MODE''NAME_FAMILY_STATUS_Married''OCCUPATION_TYPE_Sales.staff''OCCUPATION_TYPE_Laborers''FLOORSMIN_MODE''OCCUPATION_TYPE_Managers''AMT_INCOME_TOTAL''NAME_TYPE_SUITE_Family''LANDAREA_MODE''AMT_REQ_CREDIT_BUREAU_QRT''DAYS_REGISTRATION''REG_CITY_NOT_WORK_CITY''NAME_FAMILY_STATUS_Separated''WEEKDAY_APPR_PROCESS_START_WEDNESDAY''FLAG_OWN_REALTY_Y''OCCUPATION_TYPE_Core.staff''HOUR_APPR_PROCESS_START''NAME_FAMILY_STATUS_Widow''EMERGENCYSTATE_MODE_No''NAME_FAMILY_STATUS_Single...not.married''OBS_60_CNT_SOCIAL_CIRCLE''WALLSMATERIAL_MODE_Panel''FLAG_PHONE''FLAG_EMP_PHONE''NAME_INCOME_TYPE_Commercial.associate''REGION_POPULATION_RELATIVE''WEEKDAY_APPR_PROCESS_START_THURSDAY''LIVE_CITY_NOT_WORK_CITY''FLAG_OWN_CAR_Y''FLAG_DOCUMENT_8''AMT_REQ_CREDIT_BUREAU_MON''WALLSMATERIAL_MODE_Stone..brick''CNT_FAM_MEMBERS''FONDKAPREMONT_MODE_reg.oper.account''NAME_TYPE_SUITE_Unaccompanied''FLAG_DOCUMENT_6''CNT_CHILDREN''NAME_HOUSING_TYPE_House...apartment''AMT_REQ_CREDIT_BUREAU_YEAR''ORGANIZATION_TYPE_Other''WEEKDAY_APPR_PROCESS_START_MONDAY''WEEKDAY_APPR_PROCESS_START_TUESDAY''REG_REGION_NOT_WORK_REGION''WEEKDAY_APPR_PROCESS_START_SUNDAY''ORGANIZATION_TYPE_Business.Entity.Type.3''WEEKDAY_APPR_PROCESS_START_SATURDAY''FLAG_EMAIL'
+
+
+## Modeling - parsnip used
+
+### knn
+
+```{r}
+knn_Spec <- nearest_neighbor() %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_Spec
+```
+EXT_SOURCE_2+EXT_SOURCE_1+DAYS_BIRTH+AMT_INCOME_TOTAL+CODE_GENDER_M+DAYS_ID_PUBLISH+AMT_CREDIT+   REG_CITY_NOT_WORK_CITY+CNT_FAM_MEMBERS+AMT_ANNUITY+NAME_EDUCATION_TYPE_Higher.education+REGION_POPULATION_RELATIVE+NAME_EDUCATION_TYPE_Secondary...secondary.special+REG_CITY_NOT_LIVE_CITY+DAYS_REGISTRATION 
+
+```{r eval=FALSE}
+knn_fit <- knn_Spec %>%
+  
+  fit(TARGET ~ EXT_SOURCE_2+EXT_SOURCE_1+AMT_CREDIT+NAME_EDUCATION_TYPE_Higher.education+DAYS_BIRTH+DAYS_LAST_PHONE_CHANGE+CODE_GENDER_M+AMT_ANNUITY+NAME_CONTRACT_TYPE_Revolving.loans+DAYS_ID_PUBLISH+NAME_INCOME_TYPE_State.servant+FLAG_DOCUMENT_3+DEF_30_CNT_SOCIAL_CIRCLE+NAME_INCOME_TYPE_Working+DEF_60_CNT_SOCIAL_CIRCLE,
+      data = juiced_dt1_train)
+
+knn_fit
+```
+
+
+```{r}
+# saveRDS(knn_fit,"knn_fit.rds")
+
+knn_fit <- readRDS("knn_fit.rds")
+```
+
+```{r}
+# knn_fit %>% collect_predictions()
+```
+
+
+```{r}
+# knn_workflow <- workflow() %>% 
+#   
+#   add_recipe(rec2) %>% 
+#   add_model(knn_Spec)
+```
+
+
+```{r}
+# knn_workflow %>% collect_metrics()
+```
+
+
+
+#### Predictions - train
+
+##### predict classes
+
+```{r}
+pred_class_train_knn <- predict(knn_fit, new_data = juiced_dt1_train)
+pred_class_train_knn
+```
+
+from: https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+
+```{r}
+# pred_knn_class_train <- 
+#   knn_fit %>% 
+#   predict(new_data = baked_dt1_test) %>%
+#   bind_cols(baked_dt1_test %>% select(TARGET))
+# 
+# pred_knn %>% head()
+```
+
+
+```{r}
+pred_class_train_knn <- pred_class_train_knn %>% 
+  bind_cols(juiced_dt1_train %>% select(TARGET)) 
+
+pred_class_train_knn %>% head()
+```
+
+
+##### Confusion Matrix
+
+```{r}
+pred_class_train_knn %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+```{r}
+pred_class_train_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble()
+```
+
+from: https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+
+```{r}
+pred_class_train_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = Truth, y = Prediction, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+reordering Y axis factors
+
+from: https://forcats.tidyverse.org/reference/fct_relevel.html
+
+```{r}
+pred_class_train_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  mutate(Prediction = as.factor(Prediction)) %>% 
+  
+  ggplot(aes(x = Truth, y = fct_relevel(Prediction, "1","0"), alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+##### accuracy metrics
+
+```{r}
+pred_class_train_knn %>%
+  metrics(TARGET, .pred_class)
+```
+
+
+```{r}
+pred_class_train_knn %>%
+  metrics(TARGET, .pred_class) %>%
+  select(-.estimator) %>%
+  filter(.metric == "accuracy")
+```
+
+##### prec, recall
+
+```{r}
+tibble(
+  "precision" = 
+     precision(pred_class_train_knn, TARGET, .pred_class) %>%
+     select(.estimate),
+  "recall" = 
+     recall(pred_class_train_knn, TARGET, .pred_class) %>%
+     select(.estimate)
+) %>%
+  unnest(cols = c(precision, recall)) #%>%
+  # kable()
+```
+
+```{r}
+tibble(
+  "sensitivity" = sensitivity(data = pred_class_train_knn, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate),
+  "specificity" = specificity(data = pred_class_train_knn, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate)
+  ) %>% 
+  unnest(cols = c(sensitivity, specificity))
+```
+
+**Manual Calc. to cross check numbers**
+
+Reference	
+Predicted	Positive	Negative
+Positive	A	B
+Negative	C	D
+
+`Sensitivity = A / (A+D)`
+`Specificity = D / (D+B)`
+
+
+```{r}
+pred_class_train_knn %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+Sensitivity
+
+```{r}
+17256 / (17256+1372)
+```
+
+Sensitivity
+
+```{r}
+17409 / (17409+1219)
+```
+CM from caret
+
+```{r}
+caret::confusionMatrix(pred_class_train_knn$.pred_class,
+                        pred_class_train_knn$TARGET)
+```
+
+
+```{r}
+pred_class_train_knn$TARGET %>% table()
+```
+
+
+#### Probabilities
+
+```{r}
+pred_prob_train_knn <- predict(knn_fit, new_data = juiced_dt1_train, type = "prob") 
+
+pred_prob_train_knn %>% head()
+```
+
+##### prediction distribution plot
+
+```{r}
+plot_pred_type_distribution_auto <- function(df_test, 
+                                             class1 = "yes", 
+                                             class2 = "no", 
+                                             threshold = 0.5) {
+  
+  v <- rep(NA, nrow(df_test))
+  
+  # considering class1 for True Positive so class1 will represent sensitivity
+  v <- ifelse(df_test$prob >= threshold & df_test$Class == class1, "TP", v)
+  v <- ifelse(df_test$prob >= threshold & df_test$Class == class2, "FP", v)
+  v <- ifelse(df_test$prob < threshold & df_test$Class == class1, "FN", v)
+  v <- ifelse(df_test$prob < threshold & df_test$Class == class2, "TN", v)
+  
+  df_test$pred_type <- v
+  
+  ggplot(data=df_test, aes(x=Class, y=prob)) +
+    geom_violin(fill= "gray",alpha=0.6, color="NA") +
+    geom_jitter(aes(color=pred_type), alpha=0.6) +
+    geom_hline(yintercept=threshold, color="red", alpha=0.6) +
+    scale_color_discrete(name = "type") +
+    labs(title=sprintf("Results Tradeoff at Threshold %.2f", threshold)) +
+    theme(text = element_text(size = 20))
+}
+
+```
+
+
+```{r}
+df_test <- NULL
+
+df_test$prob = pred_prob_train_knn$.pred_0
+df_test$Class = pred_class_train_knn$TARGET
+
+df_test <- as.data.frame(df_test)
+
+df_test %>% head()
+```
+
+
+```{r}
+df_test$Class <- as.character(df_test$Class)
+
+plot_pred_type_distribution_auto(df_test, class1 = 0, class2 = 1)
+```
+
+```{r}
+sum(is.na(df_test))
+```
+
+
+#### Predictions - test
+
+##### predict classes
+
+```{r}
+baked_dt1_test <- bake(rec, new_data = dt1_test)
+baked_dt1_test %>% head()
+```
+
+
+```{r}
+pred_class_test_knn <- predict(knn_fit, new_data = baked_dt1_test)
+pred_class_test_knn
+```
+
+
+
+```{r}
+pred_class_test_knn <- pred_class_test_knn %>% 
+  bind_cols(baked_dt1_test %>% select(TARGET)) 
+
+pred_class_test_knn %>% head()
+```
+
+
+##### Confusion Matrix
+
+```{r}
+pred_class_test_knn %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+```{r}
+pred_class_test_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble()
+```
+
+from: https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+
+```{r}
+pred_class_test_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = Truth, y = Prediction, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+reordering Y axis factors
+
+from: https://forcats.tidyverse.org/reference/fct_relevel.html
+
+```{r}
+pred_class_test_knn %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  mutate(Prediction = as.factor(Prediction)) %>% 
+  
+  ggplot(aes(x = Truth, y = fct_relevel(Prediction, "1","0"), alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+##### accuracy metrics
+
+```{r}
+pred_class_test_knn %>%
+  metrics(TARGET, .pred_class)
+```
+
+
+```{r}
+pred_class_test_knn %>%
+  metrics(TARGET, .pred_class) %>%
+  select(-.estimator) %>%
+  filter(.metric == "accuracy")
+```
+
+##### prec, recall
+
+```{r}
+tibble(
+  "precision" = 
+     precision(pred_class_test_knn, TARGET, .pred_class) %>%
+     select(.estimate),
+  "recall" = 
+     recall(pred_class_test_knn, TARGET, .pred_class) %>%
+     select(.estimate)
+) %>%
+  unnest(cols = c(precision, recall)) #%>%
+  # kable()
+```
+
+```{r}
+tibble(
+  "sensitivity" = sensitivity(data = pred_class_test_knn, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate),
+  "specificity" = specificity(data = pred_class_test_knn, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate)
+  ) %>% 
+  unnest(cols = c(sensitivity, specificity))
+```
+
+CM from caret
+
+```{r}
+caret::confusionMatrix(pred_class_test_knn$.pred_class,
+                        pred_class_test_knn$TARGET)
+```
+
+
+#### Probabilities
+
+```{r}
+pred_prob_test_knn <- predict(knn_fit, new_data = baked_dt1_test, type = "prob") 
+
+pred_prob_test_knn %>% head()
+```
+
+##### prediction distribution plot
+
+```{r}
+df_test <- NULL
+
+df_test$prob <- pred_prob_test_knn$.pred_0
+df_test$Class <- pred_class_test_knn$TARGET
+
+df_test <- as.data.frame(df_test)
+df_test %>% head()
+```
+
+```{r}
+df_test$Class <- as.character(df_test$Class)
+
+plot_pred_type_distribution_auto(df_test, class1 = "0", class2 = "1")
+```
+
+```{r}
+sum(is.na(df_test))
+```
+
+```{r}
+plot_pred_type_distribution_auto(df_test, class1 = "0", class2 = "1", threshold = 0.7)
+```
+
+
+### RandomForest
+
+```{r}
+rf_Spec <- rand_forest() %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+rf_Spec
+```
+
+```{r eval=FALSE}
+rf_fit <- rf_Spec %>%
+  
+  fit(TARGET ~ EXT_SOURCE_2+EXT_SOURCE_1+AMT_CREDIT+NAME_EDUCATION_TYPE_Higher.education+DAYS_BIRTH+DAYS_LAST_PHONE_CHANGE+CODE_GENDER_M+AMT_ANNUITY+NAME_CONTRACT_TYPE_Revolving.loans+DAYS_ID_PUBLISH+NAME_INCOME_TYPE_State.servant+FLAG_DOCUMENT_3+DEF_30_CNT_SOCIAL_CIRCLE+NAME_INCOME_TYPE_Working+DEF_60_CNT_SOCIAL_CIRCLE,
+      data = juiced_dt1_train)
+
+rf_fit
+```
+
+
+```{r}
+# saveRDS(rf_fit,"rf_fit.rds")
+rf_fit <- readRDS("rf_fit.rds")
+```
+
+
+#### Predictions - train
+
+##### predict classes
+
+```{r}
+pred_class_train_rf <- predict(rf_fit, new_data = juiced_dt1_train)
+pred_class_train_rf
+```
+
+
+```{r}
+pred_class_train_rf <- pred_class_train_rf %>% 
+  bind_cols(juiced_dt1_train %>% select(TARGET)) 
+
+pred_class_train_rf %>% head()
+```
+
+
+##### Confusion Matrix
+
+```{r}
+pred_class_train_rf %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+```{r}
+pred_class_train_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble()
+```
+
+from: https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+
+```{r}
+pred_class_train_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = Truth, y = Prediction, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+reordering Y axis factors
+
+from: https://forcats.tidyverse.org/reference/fct_relevel.html
+
+```{r}
+pred_class_train_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  mutate(Prediction = as.factor(Prediction)) %>% 
+  
+  ggplot(aes(x = Truth, y = fct_relevel(Prediction, "1","0"), alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+##### accuracy metrics
+
+```{r}
+pred_class_train_rf %>%
+  metrics(TARGET, .pred_class)
+```
+
+
+```{r}
+pred_class_train_rf %>%
+  metrics(TARGET, .pred_class) %>%
+  select(-.estimator) %>%
+  filter(.metric == "accuracy")
+```
+
+##### prec, recall
+
+```{r}
+tibble(
+  "precision" = 
+     precision(pred_class_train_rf, TARGET, .pred_class) %>%
+     select(.estimate),
+  "recall" = 
+     recall(pred_class_train_rf, TARGET, .pred_class) %>%
+     select(.estimate)
+) %>%
+  unnest(cols = c(precision, recall)) #%>%
+  # kable()
+```
+
+```{r}
+tibble(
+  "sensitivity" = sensitivity(data = pred_class_train_rf, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate),
+  "specificity" = specificity(data = pred_class_train_rf, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate)
+  ) %>% 
+  unnest(cols = c(sensitivity, specificity))
+```
+
+
+```{r}
+pred_class_train_rf %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+CM from caret
+
+```{r}
+caret::confusionMatrix(pred_class_train_rf$.pred_class,
+                        pred_class_train_rf$TARGET)
+```
+
+
+#### Probabilities
+
+```{r}
+pred_prob_train_rf <- predict(rf_fit, new_data = juiced_dt1_train, type = "prob") 
+
+pred_prob_train_rf %>% head()
+```
+
+##### prediction distribution plot
+
+```{r}
+df_test <- NULL
+
+df_test$prob <- pred_prob_train_rf$.pred_0
+df_test$Class <- pred_class_train_rf$TARGET
+
+df_test <- as.data.frame(df_test) 
+df_test %>% head()
+```
+
+```{r}
+df_test$Class <- as.character(df_test$Class)
+
+plot_pred_type_distribution_auto(df_test, class1 = "0", class2 = "1")
+```
+
+
+#### Predictions - test
+
+##### predict classes
+
+```{r}
+pred_class_test_rf <- predict(rf_fit, new_data = baked_dt1_test)
+pred_class_test_rf
+```
+
+
+
+```{r}
+pred_class_test_rf <- pred_class_test_rf %>% 
+  bind_cols(baked_dt1_test %>% select(TARGET)) 
+
+pred_class_test_rf %>% head()
+```
+
+
+##### Confusion Matrix
+
+```{r}
+pred_class_test_rf %>% 
+  conf_mat(TARGET, .pred_class) 
+```
+
+```{r}
+pred_class_test_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble()
+```
+
+from: https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+
+```{r}
+pred_class_test_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = Truth, y = Prediction, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+reordering Y axis factors
+
+from: https://forcats.tidyverse.org/reference/fct_relevel.html
+
+```{r}
+pred_class_test_rf %>% 
+  conf_mat(TARGET, .pred_class) %>% 
+  pluck(1) %>% 
+  as_tibble() %>% 
+  mutate(Prediction = as.factor(Prediction)) %>% 
+  
+  ggplot(aes(x = Truth, y = fct_relevel(Prediction, "1","0"), alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 7)
+```
+
+##### accuracy metrics
+
+```{r}
+pred_class_test_rf %>%
+  metrics(TARGET, .pred_class)
+```
+
+
+```{r}
+pred_class_test_rf %>%
+  metrics(TARGET, .pred_class) %>%
+  select(-.estimator) %>%
+  filter(.metric == "accuracy")
+```
+
+##### prec, recall
+
+```{r}
+tibble(
+  "precision" = 
+     precision(pred_class_test_rf, TARGET, .pred_class) %>%
+     select(.estimate),
+  "recall" = 
+     recall(pred_class_test_rf, TARGET, .pred_class) %>%
+     select(.estimate)
+) %>%
+  unnest(cols = c(precision, recall)) #%>%
+  # kable()
+```
+
+```{r}
+tibble(
+  "sensitivity" = sensitivity(data = pred_class_test_rf, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate),
+  "specificity" = specificity(data = pred_class_test_rf, truth = TARGET, estimate = .pred_class) %>% 
+    select(.estimate)
+  ) %>% 
+  unnest(cols = c(sensitivity, specificity))
+```
+
+CM from caret
+
+```{r}
+caret::confusionMatrix(pred_class_test_rf$.pred_class,
+                        pred_class_test_rf$TARGET)
+```
+
+
+#### Probabilities
+
+```{r}
+pred_prob_test_rf <- predict(rf_fit, new_data = baked_dt1_test, type = "prob") 
+
+pred_prob_test_rf %>% head()
+```
+
+##### prediction distribution plot
+
+```{r}
+df_test <- NULL
+
+df_test$prob <- pred_prob_test_rf$.pred_0 
+df_test$Class <- pred_class_test_rf$TARGET
+
+df_test <- as.data.frame(df_test) 
+df_test %>% head()
+```
+
+```{r}
+df_test$Class <- as.character(df_test$Class)
+
+plot_pred_type_distribution_auto(df_test, class1 = "0", class2 = "1")
+```
+
+
+```{r}
+plot_pred_type_distribution_auto(df_test, class1 = "0", class2 = "1", threshold = 0.7)
+```
+
+## Model with CV / tidymodels
+
+https://youtu.be/s3TkvZM60iU?t=2294
+
+### CV
+
+```{r}
+set.seed(123)
+
+folds <- vfold_cv(juice(rec), strata = TARGET)
+```
+
+
+### RF
+
+```{r eval=FALSE}
+set.seed(234)
+
+rf_rs <- rf_Spec %>% 
+  fit_resamples(TARGET ~ EXT_SOURCE_2+EXT_SOURCE_1+AMT_CREDIT+NAME_EDUCATION_TYPE_Higher.education+DAYS_BIRTH+DAYS_LAST_PHONE_CHANGE+CODE_GENDER_M+AMT_ANNUITY+NAME_CONTRACT_TYPE_Revolving.loans+DAYS_ID_PUBLISH+NAME_INCOME_TYPE_State.servant+FLAG_DOCUMENT_3+DEF_30_CNT_SOCIAL_CIRCLE+NAME_INCOME_TYPE_Working+DEF_60_CNT_SOCIAL_CIRCLE,
+                
+                folds,
+                metrics = metric_set(roc_auc, sens, spec),
+                control = control_resamples(save_pred = TRUE))
+
+rf_rs
+```
+
+```{r}
+# saveRDS(rf_rs, "rf_rs.rds")
+rf_rs <- readRDS("rf_rs.rds")
+```
+
+
+```{r}
+rf_rs$.metrics
+```
+
+
+```{r}
+rf_rs %>% collect_metrics()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
